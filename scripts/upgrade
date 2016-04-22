@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# Retrieve arguments
+root_pwd=$(sudo cat /etc/yunohost/mysql)
+domain=$(sudo yunohost app setting piwik domain)
+admin=$(sudo yunohost app setting piwik admin)
+path=$(sudo yunohost app setting piwik path)
+geoip_plugin=$(sudo yunohost app setting piwik geoip_plugin)
+db_user=$(sudo yunohost app setting piwik db_user)
+db_pwd=$(sudo yunohost app setting piwik mysqlpwd)
+
+# Change variables in nginx configuration
+final_path=/var/www/piwik
+sudo sed -i "s@PATHTOCHANGE@$path@g" ../conf/nginx.conf
+sudo sed -i "s@ALIASTOCHANGE@$final_path/@g" ../conf/nginx.conf
+sudo sed -i "s@NAMETOCHANGE@piwik@g" ../conf/nginx.conf
+sudo sed -i "s@IPTOCHANGE@$(hostname --ip-address)@g" ../conf/nginx.conf
+sudo cp ../conf/nginx.conf /etc/nginx/conf.d/$domain.d/piwik.conf
+# Reload Nginx
+sudo service nginx reload
+
+# Backup Piwik's config file
+mkdir bkp
+sudo cp $final_path/config/config.ini.php bkp/
+
+# Copy files to right place
+sudo mkdir -p $final_path
+tar -xf ../sources/piwik.tar.gz
+sudo \mv -f piwik/* $final_path
+
+# Set right permissions for curl install
+sudo chown -R www-data: $final_path
+
+# Modify php-fpm pool configuration and copy it to php-fpm pool directory for piwik
+finalphpconf=/etc/php5/fpm/pool.d/piwik.conf
+finalphpini=/etc/php5/fpm/conf.d/20-piwik.ini
+sed -i "s@__NAMETOCHANGE__@piwik@g" ../conf/php-fpm.conf
+sed -i "s@__FINALPATH__@$final_path@g" ../conf/php-fpm.conf
+sed -i "s@__FINALPATH__@$final_path@g" ../conf/php-fpm.ini
+sudo cp ../conf/php-fpm.conf $finalphpconf
+sudo cp ../conf/php-fpm.ini $finalphpini
+sudo chown root: $finalphpconf
+sudo chown root: $finalphpini
+sudo /etc/init.d/php5-fpm reload
+
+# Copy supplementary files to right place
+sudo "cp" -a ../sources/additions/* $final_path
+
+# Restore Piwik's configuration file
+sudo mv -f bkp/config.ini.php $final_path/config/config.ini.php
+
+# Files owned by www-data, for upgrade
+sudo chmod 644 -R $final_path
+# sudo find $final_path -type f -print0 | xargs -0 sudo chmod 644		# Applique les permissions sur les fichiers (rw-r--r--)
+# Some files
+xargs -a ../conf/Liste_exec -I{} sudo chmod 554 "$final_path/{}"	# Maintient les droits d'exec sur les fichiers les nécessitant, pour ne pas empêcher l'exécution des scripts nécessaires (r-xr-xr--)
+sudo find $final_path -type d -print0 | xargs -0 sudo chmod 755 # (rwxr-xr-x)
+sudo chown -R www-data:root $final_path
